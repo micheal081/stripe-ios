@@ -14,9 +14,9 @@ import Foundation
     /// - Note: The PaymentIntent or SetupIntent you create on your server must have the same values or the payment/setup will fail.
     struct IntentConfiguration {
 
-        /// Pass this into `intentCreationCallback` to force PaymentSheet to show success and dismiss.
-        /// - Note: Only for advanced users, not required for most integrations.
-        @_spi(STP) public static let FORCE_SUCCESS = "FORCE_SUCCESS"
+        /// Pass this into `intentCreationCallback` to force PaymentSheet to show success, dismiss the sheet without confirming payment, and return a PaymentSheetResult of `completed`.
+        /// - Note: ⚠️ Only for advanced users, not required for most integrations.
+        @_spi(PaymentSheetSkipConfirmation) public static let COMPLETE_WITHOUT_CONFIRMING_INTENT = "COMPLETE_WITHOUT_CONFIRMING_INTENT"
 
         /// Called when the customer confirms payment.
         /// Your implementation should create a PaymentIntent or SetupIntent on your server and call the `intentCreationCallback` with its client secret or an error if one occurred.
