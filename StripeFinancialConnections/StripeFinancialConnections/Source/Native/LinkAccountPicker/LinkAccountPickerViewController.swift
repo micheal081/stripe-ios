@@ -92,7 +92,6 @@ final class LinkAccountPickerViewController: UIViewController {
                             )
                         )
                     }
-
                 case .failure(let error):
                     self.dataSource
                         .analyticsClient

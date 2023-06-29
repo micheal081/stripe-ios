@@ -82,7 +82,7 @@ struct PlaygroundMainView: View {
                     Section(header: Text("PERMISSIONS")) {
                         Toggle("Balances", isOn: $viewModel.enableBalancesPermission)
                             .accessibility(identifier: "playground-balances-permission")
-                        
+
                         Toggle("Transactions \(viewModel.flow == .networking ? "(enable step-up verification)" : "")", isOn: $viewModel.enableTransactionsPermission)
                             .accessibility(identifier: "playground-transactions-permission")
                     }
