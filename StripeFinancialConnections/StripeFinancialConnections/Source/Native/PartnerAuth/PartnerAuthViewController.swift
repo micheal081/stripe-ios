@@ -301,7 +301,7 @@ final class PartnerAuthViewController: UIViewController {
                 eventName: "success",
                 authSessionId: authSession.id
             )
-
+            
             if authSession.isOauthNonOptional {
                 // for OAuth flows, we need to fetch OAuth results
                 self.authorizeAuthSession(authSession)
@@ -355,28 +355,6 @@ final class PartnerAuthViewController: UIViewController {
                 eventName: "cancel",
                 authSessionId: authSession.id
             )
-        }
-
-        if let error = error {
-            if
-                (error as NSError).domain == ASWebAuthenticationSessionErrorDomain,
-                (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue
-            {
-                dataSource
-                    .analyticsClient
-                    .log(
-                        eventName: "secure_webview_cancel",
-                        pane: .partnerAuth
-                    )
-            } else {
-                dataSource
-                    .analyticsClient
-                    .logUnexpectedError(
-                        error,
-                        errorName: "ASWebAuthenticationSessionError",
-                        pane: .partnerAuth
-                    )
-            }
         }
 
         // cancel current auth session because something went wrong
@@ -480,6 +458,8 @@ final class PartnerAuthViewController: UIViewController {
                 self.lastHandledAuthenticationSessionReturnUrl = returnUrl
 
                 let logUrlReceived: (_ status: String?) -> Void = { [weak self] status in
+                    // TODO(kgaidis): log this for
+                    
                     guard let self = self else { return }
                     self.dataSource
                         .analyticsClient
@@ -506,6 +486,31 @@ final class PartnerAuthViewController: UIViewController {
                 // so assume a "cancel"
                 else {
                     logUrlReceived(nil)
+                    
+                    if let error = error {
+                        if
+                            (error as NSError).domain == ASWebAuthenticationSessionErrorDomain,
+                            (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue
+                        {
+                            self.dataSource
+                                .analyticsClient
+                                .log(
+                                    eventName: "secure_webview_cancel",
+                                    pane: .partnerAuth
+                                )
+                        } else {
+                            self.dataSource
+                                .analyticsClient
+                                .logUnexpectedError(
+                                    error,
+                                    errorName: "ASWebAuthenticationSessionError",
+                                    pane: .partnerAuth
+                                )
+                        }
+                    }
+                    
+                    // TODO(kgaidis):
+                    
                     self.handleAuthSessionCompletionWithNoStatus(authSession, error)
                 }
 
@@ -629,6 +634,37 @@ final class PartnerAuthViewController: UIViewController {
             }
         )
     }
+    
+    private func retrieveAuthSession(
+        authSession: FinancialConnectionsAuthSession,
+        // executed if
+        noSuccessCompletionHandler: @escaping () -> Void
+    ) {
+        showEstablishingConnectionLoadingView(true)
+        dataSource
+            .retrieveAuthSession(authSession)
+            .observe { [weak self] result in
+                guard let self = self else { return }
+                self.showEstablishingConnectionLoadingView(false)
+                
+                switch result {
+                case .success(let authSession):
+                    
+                    // TODO(kgaidis): ...
+                    print(authSession)
+                case .failure(let error):
+                    // if there's an error, we don't do anything
+                    // user can navigate away or press 'Continue'
+                    self.dataSource
+                        .analyticsClient
+                        .logUnexpectedError(
+                            error,
+                            errorName: "RetrieveAuthSessionError",
+                            pane: .partnerAuth
+                        )
+                }
+            }
+    }
 }
 
 // MARK: - STPURLCallbackListener
@@ -639,20 +675,27 @@ extension PartnerAuthViewController: STPURLCallbackListener {
     private func handleAuthSessionCompletionFromNativeRedirect(_ url: URL) {
         assertMainQueue()
 
-        guard let authSession = dataSource.pendingAuthSession else { return }
-        guard var urlComponsents = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return }
+        guard let authSession = dataSource.pendingAuthSession else {
+            return
+        }
+        guard var urlComponsents = URLComponents(url: url, resolvingAgainstBaseURL: true) else {
+            dataSource.recordAuthSessionEvent(
+                eventName: "native-app-to-app-failed-to-resolve-url",
+                authSessionId: authSession.id
+            )
+            return
+        }
         urlComponsents.query = url.fragment
 
-        guard
+        if
             let status = urlComponsents.queryItems?.first(where: { $0.name == "code" })?.value,
             let authSessionId = urlComponsents.queryItems?.first(where: { $0.name == "authSessionId" })?.value,
             authSessionId == dataSource.pendingAuthSession?.id
-        else {
-            self.handleAuthSessionCompletionWithNoStatus(authSession, nil)
-            return
+        {
+            handleAuthSessionCompletionWithStatus(status, authSession)
+        } else {
+            handleAuthSessionCompletionWithNoStatus(authSession, nil)
         }
-
-        handleAuthSessionCompletionWithStatus(status, authSession)
     }
 
     func handleURLCallback(_ url: URL) -> Bool {
@@ -729,18 +772,52 @@ private extension PartnerAuthViewController {
 
     private func handleAuthSessionCompletionFromNativeRedirectIfNeeded() {
         assertMainQueue()
-
-        guard UIApplication.shared.applicationState == .active,
-            let url = unprocessedReturnURL
-        else {
+        
+        guard UIApplication.shared.applicationState == .active else {
             /**
              When we get url callback the app might not be in foreground state.
              If we then proceed with authorization network request might fail as we will be doing background networking without special permission..
              */
             return
         }
-        handleAuthSessionCompletionFromNativeRedirect(url)
-        clearStateAndUnsubscribeFromNotifications()
+        if let url = unprocessedReturnURL {
+            if let authSession = dataSource.pendingAuthSession {
+                dataSource.recordAuthSessionEvent(
+                    eventName: "native-app-to-app-redirect-url-received",
+                    authSessionId: authSession.id
+                )
+            }
+            handleAuthSessionCompletionFromNativeRedirect(url)
+            clearStateAndUnsubscribeFromNotifications()
+        } else if
+            !dataSource.disableAuthSessionRetrieval,
+            let authSession = dataSource.pendingAuthSession
+        {
+            showEstablishingConnectionLoadingView(true)
+            dataSource
+                .retrieveAuthSession(authSession)
+                .observe { [weak self] result in
+                    guard let self = self else { return }
+                    self.showEstablishingConnectionLoadingView(false)
+                    
+                    switch result {
+                    case .success(let authSession):
+                        
+                        // TODO(kgaidis): ...
+                        print(authSession)
+                    case .failure(let error):
+                        // if there's an error, we don't do anything
+                        // user can navigate away or press 'Continue'
+                        self.dataSource
+                            .analyticsClient
+                            .logUnexpectedError(
+                                error,
+                                errorName: "RetrieveAuthSessionError",
+                                pane: .partnerAuth
+                            )
+                    }
+                }
+        }
     }
 }
 
